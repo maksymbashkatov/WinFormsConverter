@@ -1,15 +1,18 @@
 ﻿using System;
 using System.Collections;
+using System.ComponentModel;
 using System.Drawing;
 using System.IO;
 using System.IO.Compression;
+using System.Threading;
 using System.Windows.Forms;
 
 namespace WinFormsConverter
 {
     public partial class Form1 : Form
     {
-        Button convertFileButton = new Button();
+        Button convertButton = new Button();
+        Button cancelButton = new Button();
         TextBox pathInputTextBox = new TextBox();
         TextBox pathSaveTextBox = new TextBox();
         OpenFileDialog openFileDialog = new OpenFileDialog();
@@ -18,9 +21,9 @@ namespace WinFormsConverter
         // Путь откуда берётся архив
         string pathToOriginalArchive;
         // Путь куда сохраняется архив
-        string pathToConvertedArchive;
+        string pathToConvertedArchive = "";
         string[] pathToOriginalArchiveArray;
-        string archiveName;
+        string archiveName = "";
         string zipDirectory = "";
         string directoryForExtraction;
 
@@ -55,6 +58,8 @@ namespace WinFormsConverter
         // Хранит список уникальных строк файла
         ArrayList listOfUniqueStringsInFile;
 
+        BackgroundWorker bw = new BackgroundWorker();
+
         public Form1()
         {
             InitializeComponent();
@@ -63,7 +68,10 @@ namespace WinFormsConverter
         private void Form1_Load(object sender, EventArgs e)
         {
             // Кнопка конвертации архива
-            FillInButton(convertFileButton, "Convert File", 60, 20, 10, 70, convertFileButton_Click);
+            FillInButton(convertButton, "START", 60, 20, 10, 70, convertButton_Click);
+
+            // Кнопка отмены конвертации архива
+            FillInButton(cancelButton, "STOP", 60, 20, 80, 70, cancelButton_Click);
 
             // Поле для ввода пути к zip архиву с исходными файлами
             FillInTextBox(pathInputTextBox, "Enter path to file", 500, 20, 10, 10, pathInputTextBox_MouseClick);
@@ -72,12 +80,11 @@ namespace WinFormsConverter
             FillInTextBox(pathSaveTextBox, "Enter save path to file", 500, 20, 10, 40, pathSaveTextBox_MouseClick);
         }
 
-        private async void convertFileButton_Click(object sender, EventArgs e)
+        void bw_DoWork(object sender, DoWorkEventArgs e)
         {
             // Распаковка архива в директорию
             pathToOriginalArchiveArray = pathToOriginalArchive.Split(new string[] { @"\" }, StringSplitOptions.None);
             archiveName = pathToOriginalArchiveArray[pathToOriginalArchiveArray.Length - 1];
-            zipDirectory = "";
             for (int i = 0; i < pathToOriginalArchiveArray.Length - 1; i++)
             {
                 zipDirectory += (i < 1) ? pathToOriginalArchiveArray[i] : $@"\{pathToOriginalArchiveArray[i]}";
@@ -90,10 +97,20 @@ namespace WinFormsConverter
 
             foreach (string oneOfListOfDirectories1 in arrayOfDirectories1)
             {
+                if (bw.CancellationPending == true)
+                {
+                    e.Cancel = true;
+                    break;
+                }
                 // Получить список каталогов, из католога
                 string[] listOfDirectories2 = Directory.GetDirectories(oneOfListOfDirectories1);
                 foreach (string oneOfListOfDirectories2 in listOfDirectories2)
                 {
+                    if (bw.CancellationPending == true)
+                    {
+                        e.Cancel = true;
+                        break;
+                    }
                     string[] arrayOldPathToFile = oneOfListOfDirectories2.Split(new string[] { @"\" }, StringSplitOptions.None);
                     brokerName = arrayOldPathToFile[arrayOldPathToFile.Length - 2];
                     currCode = arrayOldPathToFile[arrayOldPathToFile.Length - 1];
@@ -101,6 +118,11 @@ namespace WinFormsConverter
                     string[] listOfFiles = Directory.GetFiles(oneOfListOfDirectories2);
                     foreach (string oneOflistOfFiles in listOfFiles)
                     {
+                        if (bw.CancellationPending == true)
+                        {
+                            e.Cancel = true;
+                            break;
+                        }
                         FileInfo fileInfo = new FileInfo(oneOflistOfFiles);
                         string[] tempStrArr = oneOflistOfFiles.Split(new string[] { @"\" }, StringSplitOptions.None);
                         string[] tempFileNameStr = tempStrArr[tempStrArr.Length - 1].Split(new char[] { '_', '.' }, StringSplitOptions.None);
@@ -125,9 +147,14 @@ namespace WinFormsConverter
                         // Чтение из файла
                         using (FileStream fileStream = File.OpenRead(oneOflistOfFiles))
                         {
+                            if (bw.CancellationPending == true)
+                            {
+                                e.Cancel = true;
+                                break;
+                            }
                             arrayOfFileBytes = new byte[fileStream.Length];
                             // Асинхронное чтение файла
-                            await fileStream.ReadAsync(arrayOfFileBytes, 0, arrayOfFileBytes.Length);
+                            fileStream.Read(arrayOfFileBytes, 0, arrayOfFileBytes.Length);
 
                             if (writeToSameFile == false)
                             {
@@ -142,6 +169,11 @@ namespace WinFormsConverter
                             arrayOfStringsInFile = textFromFile.Split(new string[] { "\r\n" }, StringSplitOptions.RemoveEmptyEntries);
                             for (int i = 0; i < arrayOfStringsInFile.Length; i++)
                             {
+                                if (bw.CancellationPending == true)
+                                {
+                                    e.Cancel = true;
+                                    break;
+                                }
                                 arrayOfFileLines = arrayOfStringsInFile[i].Split(new string[] { ";" }, StringSplitOptions.None);
                                 unixTime = arrayOfFileLines[0];
                                 bid = arrayOfFileLines[1];
@@ -163,6 +195,11 @@ namespace WinFormsConverter
                             // Запись только уникальных строк из массива в список
                             for (int i = 0; i < arrayOfStringsInFile.Length; i++)
                             {
+                                if (bw.CancellationPending == true)
+                                {
+                                    e.Cancel = true;
+                                    break;
+                                }
                                 if (!(listOfUniqueStringsInFile.Contains(arrayOfStringsInFile[i])))
                                 {
                                     listOfUniqueStringsInFile.Add(arrayOfStringsInFile[i]);
@@ -179,22 +216,52 @@ namespace WinFormsConverter
                         // Запись в файл
                         using (FileStream fstream = new FileStream(tempFolder2 + @"\" + fileName, FileMode.OpenOrCreate))
                         {
+                            if (bw.CancellationPending == true)
+                            {
+                                e.Cancel = true;
+                                break;
+                            }
                             arrayOfFileBytes = System.Text.Encoding.Default.GetBytes(String.Join("\r\n", (string[])listOfUniqueStringsInFile.ToArray(typeof(string))));
                             // Асинхронная запись массива байтов в файл
-                            await fstream.WriteAsync(arrayOfFileBytes, 0, arrayOfFileBytes.Length);
+                            fstream.Write(arrayOfFileBytes, 0, arrayOfFileBytes.Length);
                         }
 
                     }
                 }
             }
 
-            // Архивировать директорию (путь сохранения архива)
-            pathToConvertedArchive = $@"{pathToConvertedArchive}\Converted_{archiveName}";
-            ZipFile.CreateFromDirectory($@"{zipDirectory}\tempFolder2", pathToConvertedArchive);
+            if (bw.CancellationPending != true)
+            {
+                // Архивировать директорию (путь сохранения архива)
+                pathToConvertedArchive = $@"{pathToConvertedArchive}\Converted_{archiveName}";
+                ZipFile.CreateFromDirectory($@"{zipDirectory}\tempFolder2", pathToConvertedArchive);
+            }
+            else
+            {
+                e.Cancel = true;
+            }
 
             // Удаление временных папок
-            Directory.Delete(zipDirectory + @"\tempFolder1", true);
-            Directory.Delete(zipDirectory + @"\tempFolder2", true);
+            if (Directory.Exists(zipDirectory + @"\tempFolder1"))
+            {
+                Directory.Delete(zipDirectory + @"\tempFolder1", true);
+            }
+            if (Directory.Exists(zipDirectory + @"\tempFolder2"))
+            {
+                Directory.Delete(zipDirectory + @"\tempFolder2", true);
+            }
+        }
+        private void cancelButton_Click(object sender, EventArgs e)
+        {
+            bw.CancelAsync();
+        }
+
+        private void convertButton_Click(object sender, EventArgs e)
+        {
+            //BackgroundWorker bw = new BackgroundWorker();
+            bw.DoWork += new DoWorkEventHandler(bw_DoWork);
+            bw.RunWorkerAsync();//собственно запускаем фоновый поток
+            bw.WorkerSupportsCancellation = true;
         }
 
         // Принять путь к архиву
